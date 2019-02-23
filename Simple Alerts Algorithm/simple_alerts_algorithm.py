@@ -1,7 +1,8 @@
 from py2neo import Graph
 import numpy as np
 import pandas as pd
-import queue
+# import scipy.sparse as sparse
+import datetime
 
 host = '192.168.1.111'
 password = '666666'
@@ -11,7 +12,7 @@ gr = Graph(host=host, bolt=True, password=password)
 class GraphReader:
     def __init__(self, graph):
         self.graph = graph
-        self.last_id = 0  # 307293#
+        self.last_id = 21939336  # 0# 307293#
 
     def get_next_alert(self):
         query = "match (a:Alert{id: {id}}), (c:Camera)-[:detectionCamera]->(a)-[:detectedVehicle]-(v:Vehicle) return a.time as time, v.number as number, c.hash as camera"
@@ -23,6 +24,107 @@ class GraphReader:
                 'camera']  # {'time': cursor.current['time'], 'number': cursor.current['number'], 'camera': cursor.current['camera']}
         else:
             return None
+
+
+def SimpleAlertOld(gr: Graph, deltaT: int, suspicious_level: float):
+    suspicious_level2 = suspicious_level / 2
+    GR = GraphReader(gr)
+    AllCameras = gr.run('MATCH (b:Camera) return b').to_ndarray()
+    # print('All cameras:',AllCameras)
+    lenCams = len(AllCameras)
+    # CamerasInd=pd.Series(range(lenCams),index=AllCameras)
+    time, car, camera = GR.get_next_alert()
+    TimesCarCameras = pd.DataFrame(np.zeros((1, lenCams)), index=[car], columns=AllCameras)
+    CarsMutual = pd.SparseDataFrame([0], index=[car], columns=[car], default_fill_value=0.0)
+    Cars = {car: 0}
+    io = 1
+    # pd.DataFrame([0],index=[car],columns=[car]).to_sparse()
+    # print(type(CarsMutual))
+    #    TimesCarCameras=pd.DataFrame(np.zeros((lenCars,lenCams)),index=AllCars,columns=AllCameras)
+    #    CarsMutual=pd.DataFrame(np.zeros((lenCars,lenCars)),index=AllCars,columns=AllCars)
+    # AVG=pd.Series(np.zeros((lenCars,)),index=AllCars)
+    alpha = 0.3
+    eps = alpha / 10
+    while True:
+        # read new alert
+        time, car, camera = GR.get_next_alert()
+
+        # fill the Table1 with last times
+        TimesCarCameras.loc[car, camera] = time
+        # print(TimesCarCameras.loc[car,camera])
+        # fill the Table2 with cars intersections with current car
+        # increase new intersections for current car
+        if not (car in CarsMutual.index):
+            CarsMutual[car] = 0  # CarsMutual.assign(car=0)#
+            # SDF=pd.SparseDataFrame(np.zeros((1,len(TimesCarCameras.index))),columns=TimesCarCameras.index,index=car)
+            # SDF=sparse.csr_matrix(np.zeros((1,len(TimesCarCameras.index))))
+            # print('SparseSeries:',SDF)
+            # print(pd.SparseSeries(np.zeros((len(TimesCarCameras.index),))).shape)
+            # print(CarsMutual.shape)
+            # CarsMutual.append(pd.SparseSeries(np.zeros((len(TimesCarCameras.index),))),ignore_index=True)
+            CarsMutual.loc[car] = 0
+            # CarsMutual.loc[car]=pd.SparseSeries(np.zeros((len(TimesCarCameras.index),)),index=CarsMutual.columns)#,fill_value=0
+            # pd.SparseArray
+            # CarsMutual.assign(car=0,axis=1)
+            # CarsMutual.loc[car]=#pd.SparseDataFrame([[0]*len(TimesCarCameras.index)],columns=CarsMutual.columns,index=car)
+            # CarsMutual=pd.concat([CarsMutual,SDF],axis=0)
+            Cars.update({car: io})
+            io += 1
+        # print('CarsMutual:',CarsMutual)#,CarsMutual.index)
+        # print('Columns:',CarsMutual.columns)
+        # print('Index:',CarsMutual.index)
+        # LCar=CarsMutual.loc[car]
+        # print(CarsMutual.loc[car][TimesCarCameras[camera]>=time-deltaT])
+        carNo = Cars[car]
+        for i, x in enumerate(CarsMutual.columns):
+            # print(x,car)
+            # print(CarsMutual[x][car])
+            if x != car:
+                if TimesCarCameras.at[x, camera] >= time - deltaT:
+                    # CarsMutual.set_value(car,x,CarsMutual.at[car,x]+alpha*(1-CarsMutual.at[car,x]))
+                    # CarsMutual.at[car,x]+=alpha*(1-CarsMutual.at[car,x])#CarsMutual.xs(car)[x]+=alpha*(1-CarsMutual.at[car,x])#
+                    CarsMutual.iloc[carNo, i] += alpha * (1 - CarsMutual.iloc[carNo, i])
+                    print(alpha * (1 - CarsMutual.iloc[carNo, i]), CarsMutual.iloc[carNo, i])
+                elif TimesCarCameras.loc[x, camera] < time - 2 * deltaT:
+                    CarsMutual.iloc[carNo, i] -= alpha * (CarsMutual.iloc[carNo, i])
+                    if CarsMutual.iloc[carNo, i] < eps:
+                        CarsMutual.iloc[carNo, i] = 0
+        #            if x!=car:
+        #                if TimesCarCameras.at[x,camera]>=time-deltaT:
+        #                    #CarsMutual.set_value(car,x,CarsMutual.at[car,x]+alpha*(1-CarsMutual.at[car,x]))
+        #                    #CarsMutual.at[car,x]+=alpha*(1-CarsMutual.at[car,x])#CarsMutual.xs(car)[x]+=alpha*(1-CarsMutual.at[car,x])#
+        #                    CarsMutual[x][car]+=alpha*(1-CarsMutual[x][car])
+        #                    print(alpha*(1-CarsMutual[x][car]),CarsMutual[x][car])
+        #                elif TimesCarCameras.loc[x,camera]<time-2*deltaT:
+        #                    CarsMutual[x][car]-=alpha*(CarsMutual[x][car])
+        #                    if CarsMutual[x][car]<eps:
+        #                        CarsMutual[x][car]=0
+        # sdf.to_coo()
+        # LCar[TimesCarCameras[camera]>=time-deltaT]=1-LCar
+        # CarsMutual.loc[car]+=alpha*np.where(TimesCarCameras[camera]>=time-deltaT,
+        #             1-CarsMutual.loc[car],np.where(TimesCarCameras[camera]<time-2*deltaT,-CarsMutual.loc[car],0))
+        #
+        # remove car weak dependencies
+        #        Max=np.max(CarsMutual,axis=0)
+        #        Ind=np.where(Max<alpha/2,CarsMutual.index,np.nan)
+        #        Ind=Ind[~Ind.isnan()]
+        #        CarsMutual.drop(Ind)
+        #        CarsMutual.drop(Ind,axis=1)
+        print('CarsMutual:', CarsMutual)
+
+        # calculation of mu_i for current car
+        lenCars = len(CarsMutual.index)
+        AVG = (np.sum(CarsMutual.loc[car]) - CarsMutual.loc[car, car]) / (lenCars - 1)  # .loc[car]
+        Susp = pd.Series(np.where(CarsMutual.loc[car] - AVG >= suspicious_level2, 1, 0), index=CarsMutual.index)
+        Mu = Susp.sum()  # quantity of suspicious cars #axis=1
+        if 1 < Mu <= 6:
+            ind = Susp[Susp == 1].index
+            print(CarsMutual.loc[ind, ind])
+            return True, Susp[Susp == 1].index
+        # if <eps
+        # CarsMutual=np.where(CarsMutual<eps,0,CarsMutual)
+
+    return False
 
 
 def SimpleAlert(gr: Graph, deltaT: int, suspicious_level: float):
@@ -252,6 +354,23 @@ def SimpleAlert(gr: Graph, deltaT: int, suspicious_level: float):
     #    print('Susp:',Susp)
     return flag  # False
 
+
+'''
+True ['AES9301', 'AE5930', 'KM0379'] [0.7599, 0.7599] [4, 4] 328
+True ['Е0172АХ', 'AE017AX'] [0.7599] [4] 368
+True ['AES9301', 'AE5930', 'KM0379', 'AE1252EX'] [0.7599, 0.7599, 0.7599] [4, 4, 4] 395
+True ['AE1252EX', 'AE5930', 'KM0379'] [0.8319300000000001, 0.8319300000000001] [5, 5] 408
+True ['BMH61', 'MMH61'] [0.882351] [6] 647
+True ['AES9301', 'AE5930', 'KM0379', 'AE1252EX', 'AE9094EI'] [0.882351, 0.882351, 0.882351, 0.882351] [6, 6, 6, 6] 657
+True ['AES9301', 'AE5930', 'KM0379', 'AE1252EX', 'AE9094EI', 'AE5933'] [0.882351, 0.882351, 0.882351, 0.882351, 0.882351] [6, 6, 6, 6, 6] 668
+True ['Е0172АХ', 'AE017AX', 'AO172', 'EO172AX'] [0.882351, 0.882351, 0.882351] [6, 6, 6] 864
+True ['AE0989IP', 'AE7471CB'] [0.8319300000000001] [5] 873
+True ['AE6147EM', 'AE0989IP', 'AE7471CB'] [0.8319300000000001, 0.8319300000000001] [5, 5] 891
+True ['AE6147EM', 'AE0989IP', 'AE7471CB', 'AE0710BA'] [0.8319300000000001, 0.8319300000000001, 0.8319300000000001] [5, 5, 5] 907
+True ['Е0172АХ', 'AE017AX', 'С0172АХ', 'AO172', 'EO172AX'] [0.882351, 0.882351, 0.882351, 0.882351] [6, 6, 6, 6] 914
+True ['AE6147EM', 'AE0989IP', 'AE7471CB', 'AE0710BA', 'AE4434BI'] [0.8319300000000001, 0.8319300000000001, 0.8319300000000001, 0.8319300000000001] [5, 5, 5, 5] 922
+True ['AE6147EM', 'AE0989IP', 'AE7471CB', 'AE0710BA', 'AE4434BI', 'AE0990EP'] [0.8319300000000001, 0.8319300000000001, 0.8319300000000001, 0.8319300000000001, 0.8319300000000001] [5, 5, 5, 5, 5] 961
+True ['AE9094EI', 'AE5930', 'KM0379', 'AE1252EX', 'AE5933'] [0.9176457, 0.882351, 0.882351, 0.882351] [7, 6, 6, 6] 961'''
 
 host = '192.168.1.111'
 password = '666666'
