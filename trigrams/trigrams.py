@@ -12,7 +12,7 @@ class GraphReader:
         self.last_id = last_id
 
     def get_next_alerts(self, rows):
-        query = "match (c:Camera)-[:detectionCamera]->(a:Alert)-[:detectedVehicle]->" \
+        query = "match (c:Camera)-[:detectedCamera]->(a:Alert)-[:detectedVehicle]->" \
                 "(v:Vehicle) where $from_ind <= a.id < $to_ind return c.hash as camera, " \
                 "a.time as time, v.number as number order by a.time"
         frame = self.graph.run(query, from_ind = self.alerts_read, to_ind = min(self.alerts_read + rows, self.last_id)).to_data_frame()
@@ -62,12 +62,15 @@ class SmartTrigramAlgorithm:
                 row = alerts[i]
                 self.process_alert(row)
             alerts = grr.get_next_alerts(SmartTrigramAlgorithm.MAX_ROWS_PER_READ)
+        suspect_ratios = []
         for number, vehicle in self.vehicles.items():
             if len(vehicle.pursuit_ratios) > 0:
                 res = self.find_pursuit_ratio(vehicle)
                 if len(res) > 0:
-                    print(vehicle.number)
-                    print(res)
+                    for k, v in res.items():
+                        suspect_ratios.append((k, vehicle.number, v))
+        suspect_ratios.sort(key=lambda x: x[2], reverse=True)
+        return pd.DataFrame(suspect_ratios, columns=['pursuer', 'victim', 'coefficient'])
 
     def find_pursuit_ratio(self, vehicle):
         if len(vehicle.pursuit_ratios) > 0:
@@ -122,5 +125,6 @@ start_from = 21939336 - 500
 last_id = start_from + 20000
 grr = GraphReader(gr, start_from, last_id)
 sta = SmartTrigramAlgorithm(delta_time=delta_time, graph_reader=grr)
-sta.find_pursuit()
+suspects = sta.find_pursuit()
+suspects.to_csv('suspects.csv')
 
