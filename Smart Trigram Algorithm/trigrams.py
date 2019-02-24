@@ -12,7 +12,7 @@ class GraphReader:
         self.last_id = last_id
 
     def get_next_alerts(self, rows):
-        query = "match (c:Camera)-[:detectedCamera]->(a:Alert)-[:detectedVehicle]->" \
+        query = "match (c:Camera)-[:detectionCamera]->(a:Alert)-[:detectedVehicle]->" \
                 "(v:Vehicle) where $from_ind <= a.id < $to_ind return c.hash as camera, " \
                 "a.time as time, v.number as number order by a.time"
         frame = self.graph.run(query, from_ind = self.alerts_read, to_ind = min(self.alerts_read + rows, self.last_id)).to_data_frame()
