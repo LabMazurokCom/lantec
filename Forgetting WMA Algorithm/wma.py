@@ -1,4 +1,4 @@
-from py2neo import Graph, Node, NodeMatcher
+from py2neo import Graph
 import numpy as np
 from collections import deque
 from collections import OrderedDict
@@ -266,8 +266,11 @@ class WMA:
 
     def start_inspection(self):
         alert = self.graph_reader.get_next_alert()
+        print(alert)
         j = 0
         while alert is not None:
+            if j == 12000:
+                break
             j += 1
             number = alert['number']
             camera = alert['camera']
